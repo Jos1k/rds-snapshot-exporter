@@ -1,0 +1,34 @@
+@startuml architecture
+
+' AWS PlantUml icons
+!define AWSPuml https://raw.githubusercontent.com/awslabs/aws-icons-for-plantuml/v11.1/dist
+!includeurl AWSPuml/AWSCommon.puml
+!includeurl AWSPuml/Compute/Lambda.puml
+!includeurl AWSPuml/ApplicationIntegration/SimpleQueueService.puml
+!includeurl AWSPuml/ApplicationIntegration/SimpleNotificationService.puml
+!includeurl AWSPuml/Storage/SimpleStorageServiceBucket.puml
+!includeurl AWSPuml/Database/RDS.puml
+
+!define stackName rds-s3-exporter
+
+Lambda(backup, "rds-s3-exporter", "TypeScript")
+
+SimpleNotificationService(databaseSnapshotCreatedTopic, "database-snapshotCreated-SNS-topic", "")
+SimpleQueueService(databaseBackupQ, "rds-s3-exporter-SQS-queue", "")
+SimpleQueueService(databaseBackupFailedQ, "rds-s3-exporter-SQS-failedQ", "")
+
+SimpleStorageServiceBucket(databaseBackupBucket, "rds-snapshot-backups", "2 days retention")
+note bottom
+    Bucket has object lock policy in compliance mode to retain backups for 1 days
+endnote
+
+RDS(db, "db-dev-test", "")
+
+db -d-> databaseSnapshotCreatedTopic : Snapshot created
+databaseSnapshotCreatedTopic -d-> databaseBackupQ : Subscription
+databaseBackupQ -d-> databaseBackupFailedQ
+databaseBackupQ -r-> backup
+backup -u-> db : Request snapshot export
+db -> databaseBackupBucket : Export snapshot to S3
+
+@enduml

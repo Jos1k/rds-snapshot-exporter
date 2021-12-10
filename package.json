@@ -1,0 +1,60 @@
+{
+  "name": "rds-s3-exporter",
+  "version": "0.0.0",
+  "description": "Database Non Deletable Backup Creator",
+  "author": "Ihor Hadzera",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jos1k/rds-snapshot-exporter"
+  },
+  "scripts": {
+    "build": "rimraf dist/ && tsc",
+    "lint": "eslint --fix 'src/**/*.ts'",
+    "pretest": "npm run lint && tsc",
+    "test": "nyc --reporter=lcovonly --reporter=text mocha -r ts-node/register \"./test/unit/**/*.spec.ts\"",
+    "security": "npm audit --production --audit-level high",
+    "deploy": "npm run build && serverless deploy",
+    "deploy:dev": "npm run build && serverless deploy --stage dev --force",
+    "remove": "serverless remove"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.952.0",
+    "aws-sdk-mock": "^5.5.0",
+    "middy": "^0.36.0",
+    "sinon": "^12.0.1",
+    "source-map-support": "^0.5.19",
+    "uuid": "^8.3.2"
+  },
+  "devDependencies": {
+    "@istanbuljs/nyc-config-typescript": "^1.0.1",
+    "@serverless/typescript": "^2.23.0",
+    "@types/aws-lambda": "^8.10.71",
+    "@types/mocha": "^9.0.0",
+    "@types/node": "^14.14.25",
+    "@types/sinon": "^10.0.6",
+    "@types/sinon-chai": "^3.2.6",
+    "@types/uuid": "^8.3.3",
+    "@typescript-eslint/eslint-plugin": "^5.5.0",
+    "@typescript-eslint/parser": "^5.5.0",
+    "chai": "^4.3.4",
+    "chai-as-promised": "^7.1.1",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.3.0",
+    "json-schema-to-ts": "^1.5.0",
+    "mocha": "^8.4.0",
+    "nyc": "^15.1.0",
+    "serverless": "^1.54.0",
+    "serverless-log-forwarding": "^1.4.0",
+    "serverless-plugin-lambda-dead-letter": "^1.2.1",
+    "serverless-prune-plugin": "^1.6.1",
+    "serverless-pseudo-parameters": "^2.6.1",
+    "sinon-chai": "^3.7.0",
+    "sonar-scanner": "^3.1.0",
+    "ts-loader": "^8.0.15",
+    "ts-node": "^9.1.1",
+    "tsconfig-paths": "^3.9.0",
+    "typescript": "^4.4.4",
+    "xunit-file": "^2.0.0"
+  }
+}

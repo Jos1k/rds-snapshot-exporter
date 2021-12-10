@@ -1,0 +1,6 @@
+dev:
+  configStage: dev
+  objectLockRetentionPeriod: 1
+  expireInDays: 2
+  lambdaReservedConcurrency:
+    backup: 1

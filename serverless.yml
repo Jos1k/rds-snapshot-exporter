@@ -1,0 +1,232 @@
+service:
+  name: rds-s3-exporter
+
+plugins:
+  - serverless-log-forwarding
+  - serverless-pseudo-parameters
+  - serverless-plugin-lambda-dead-letter
+  - serverless-prune-plugin
+
+provider:
+  name: aws
+  runtime: nodejs14.x
+  timeout: 30
+  stage: dev${env:USER, env:USERNAME}
+  region: eu-west-1
+  deploymentBucket:
+    name: ${opt:stage, self:custom.default-vars-stage}-deployments
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - "KMS:GenerateDataKey*"
+        - "KMS:ReEncrypt*"
+        - "KMS:GenerateDataKey*"
+        - "KMS:DescribeKey"
+        - "KMS:Encrypt"
+        - "KMS:CreateGrant"
+        - "KMS:ListGrants"
+        - "KMS:RevokeGrant"
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - "IAM:Passrole"
+        - "IAM:GetRole"
+      Resource:
+        - { Fn::GetAtt: [ snapshotExportTaskRole, Arn ] }
+    - Effect: Allow
+      Action:
+        - ssm:GetParameters
+      Resource: "*"
+    - Effect: Allow
+      Action:
+        - sqs:SendMessage
+        - sqs:ReceiveMessage
+        - sqs:DeleteMessage
+        - sqs:GetQueueUrl
+      Resource:
+        - { Fn::GetAtt: [ rdsS3ExporterQueue, Arn ] }
+        - { Fn::GetAtt: [ rdsS3ExporterFailedQ, Arn ] }
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+      Resource:
+        - "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${opt:stage}-rds-s3-exporter"
+    - Effect: Allow
+      Action:
+        - rds:DescribeDBClusterSnapshots
+        - rds:DescribeDBClusters
+        - rds:DescribeDBInstances
+        - rds:DescribeDBSnapshots
+        - rds:DescribeExportTasks
+        - rds:StartExportTask
+      Resource: "*"
+
+  environment:
+    CONFIG_STAGE: ${self:custom.vars.configStage}
+    REDEPLOY: "true"
+custom:
+  stage: ${opt:stage, self:provider.stage}
+  region: ${opt:region, self:provider.region}
+  default-vars-stage: ppe
+  vars: ${file(./vars.yml):${opt:stage, self:custom.default-vars-stage}}
+  version: ${env:BUILD_VERSION, file(package.json):version}
+  logForwarding:
+    destinationARN: ${self:custom.vars.logForwarding}
+    createLambdaPermission: false
+  rdsS3ExporterQ: ${self:custom.stage}-rds-s3-exporter
+  rdsS3ExporterFailedQ: ${self:custom.stage}-rds-s3-exporterFailedQ
+  databaseSnapshotCreatedTopic: ${self:custom.stage}-database-snapshotCreated
+  rdsS3ExporterBucket: "${self:custom.stage}-database-snapshot-backups"
+
+functions:
+  backup:
+    handler: dist/functions/backup.main
+    reservedConcurrency: ${self:custom.vars.lambdaReservedConcurrency.backup}
+    timeout: 55
+    events:
+      - sqs:
+          arn: "arn:aws:sqs:#{AWS::Region}:#{AWS::AccountId}:${self:custom.rdsS3ExporterQ}"
+          batchSize: 1
+    environment:
+      CONFIG_STAGE: ${self:custom.vars.configStage}
+      DATABASE_BACKUPS_BUCKET: ${self:custom.rdsS3ExporterBucket}
+      IAM_ROLE: "arn:aws:iam::#{AWS::AccountId}:role/${opt:stage}-rds-s3-exporter-role"
+      KMS_KEY_ID: alias/lambda
+      REGION: "eu-west-1"
+
+resources:
+  Description: Lambda to handle upload database backups to S3 bucket
+  Resources:
+    rdsS3ExporterQueue:
+      Type: AWS::SQS::Queue
+      Properties:
+        QueueName: "${self:custom.rdsS3ExporterQ}"
+        MessageRetentionPeriod: 1209600 # 14 days
+        RedrivePolicy:
+          deadLetterTargetArn:
+            Fn::GetAtt: [ rdsS3ExporterFailedQ, Arn ]
+          maxReceiveCount: 5
+        VisibilityTimeout: 60
+    rdsS3ExporterFailedQ:
+      Type: "AWS::SQS::Queue"
+      Properties:
+        QueueName: "${self:custom.rdsS3ExporterFailedQ}"
+        MessageRetentionPeriod: 1209600 # 14 days
+    databaseSnapshotCreatedTopic:
+      Type: AWS::SNS::Topic
+      Properties:
+        TopicName: ${self:custom.databaseSnapshotCreatedTopic}
+    snapshotCreatedTopicQueueSubscription:
+      Type: "AWS::SNS::Subscription"
+      Properties:
+        TopicArn: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:${self:custom.databaseSnapshotCreatedTopic}
+        Endpoint:
+          Fn::GetAtt: [ rdsS3ExporterQueue, Arn ]
+        Protocol: sqs
+        RawMessageDelivery: true
+      DependsOn:
+        - rdsS3ExporterQueue
+        - databaseSnapshotCreatedTopic
+
+    snapshotCreatedRdsTopicSubscription:
+      Type: "AWS::RDS::EventSubscription"
+      Properties:
+        Enabled: true
+        EventCategories : [ "creation"]
+        SnsTopicArn : arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:${self:custom.databaseSnapshotCreatedTopic}
+        SourceType : "db-snapshot"
+      DependsOn:
+        - databaseSnapshotCreatedTopic
+
+    rdsS3ExporterQueuePolicy:
+      Type: AWS::SQS::QueuePolicy
+      Properties:
+        Queues:
+          - Ref: rdsS3ExporterQueue
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal: "*"
+              Action: [ "sqs:SendMessage" ]
+              Resource:
+                Fn::GetAtt: [ rdsS3ExporterQueue, Arn ]
+              Condition:
+                ArnEquals:
+                  aws:SourceArn: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:${self:custom.databaseSnapshotCreatedTopic}
+    
+    rdsS3ExporterBucket:
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      Properties:
+        BucketName: ${self:custom.rdsS3ExporterBucket}
+        AccessControl: Private
+        VersioningConfiguration:
+          Status: Enabled
+        ObjectLockEnabled: true
+        ObjectLockConfiguration:
+          ObjectLockEnabled: Enabled
+          Rule:
+            DefaultRetention:
+              Mode: COMPLIANCE
+              Days: "${self:custom.vars.objectLockRetentionPeriod}"
+        LifecycleConfiguration:
+          Rules:
+            - Id: DeleteObjectAfter31Days
+              Status: Enabled
+              ExpirationInDays: ${self:custom.vars.expireInDays}
+        PublicAccessBlockConfiguration:
+          BlockPublicAcls: true
+          BlockPublicPolicy: true
+          IgnorePublicAcls: true
+          RestrictPublicBuckets: true
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+
+    snapshotExportTaskRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: ${opt:stage}-rds-s3-exporter-role
+        Path: /
+        AssumeRolePolicyDocument: 
+          Version: '2012-10-17'
+          Statement: 
+            - Effect: Allow
+              Principal:
+                Service:
+                  - rds-export.aws.internal
+                  - export.rds.amazonaws.com
+              Action:
+                - "sts:AssumeRole"
+        Policies:
+            - PolicyName: ${opt:stage}-rds-s3-exporter-policy
+              PolicyDocument:
+                Version: '2012-10-17'
+                Statement:
+                  - Effect: Allow
+                    Action:
+                      - "s3:PutObject*"
+                      - "s3:ListBucket"
+                      - "s3:GetObject*"
+                      - "s3:DeleteObject*"
+                      - "s3:GetBucketLocation"
+                    Resource:
+                      - "arn:aws:s3:::${self:custom.rdsS3ExporterBucket}"
+                      - "arn:aws:s3:::${self:custom.rdsS3ExporterBucket}/*"
+
+package:
+  include:
+    - dist/**
+    - package.json
+  exclude:
+    - "*"
+    - .?*/**
+    - src/**
+    - test/**
+    - docs/**
+    - infrastructure/**
+    - postman/**
+    - offline/**
+    - node_modules/.bin/**

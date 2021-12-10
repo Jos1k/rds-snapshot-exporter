@@ -1,0 +1,1 @@
+export const ALLOWED_EVENTS = ["Manual snapshot created", "Automated snapshot created"]
