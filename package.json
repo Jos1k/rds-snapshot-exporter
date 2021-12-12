@@ -12,7 +12,6 @@
     "build": "rimraf dist/ && tsc",
     "lint": "eslint --fix 'src/**/*.ts'",
     "pretest": "npm run lint && tsc",
-    "test": "nyc --reporter=lcovonly --reporter=text mocha -r ts-node/register \"./test/unit/**/*.spec.ts\"",
     "security": "npm audit --production --audit-level high",
     "deploy": "npm run build && serverless deploy",
     "deploy:dev": "npm run build && serverless deploy --stage dev --force",

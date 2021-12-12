@@ -36,18 +36,3 @@ Exports postal-returns DB snapshots to an S3 bucket with an object lock in compl
 
 - "Manual snapshot created"
 - "Automated snapshot created"
-
-## Testing
-
-For running Unit Tests please use following command:
-
-```bash
-npm test
-```
-
-For running Acceptance Tests please use following command:
-
-```bash
-npm test:acceptance:dev
-```
-> NOTE: There is an acceptance test for success scenario which is in skipped state. It is marked as skipped because AWS will throw ExportTaskAlreadyExists exception if lambda will try to create new Export Task on snapshot which already has In Progress export task 

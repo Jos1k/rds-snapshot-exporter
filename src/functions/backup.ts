@@ -3,12 +3,14 @@ import { v4 as uuidv4 } from 'uuid';
 import middy = require("middy");
 import * as AWS from "aws-sdk";
 import { ALLOWED_EVENTS } from "../libs/allowedEvents";
-import {RDSEventType} from '../models/RDSEventType';
 import { getAllowedSourcePrefixes } from "../libs/isSourceAllowed";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const processEvent: Handler<any, void> = async (event: RDSEventType) => {
+export const processEvent: Handler<any, void> = async (request: any) => {
 	console.info("rds-s3-exporter.started");
+
+	const record = request.Records[0];
+	const event = JSON.parse(record.body);
 
 	if(!isSourceAllowed(event["Source ID"])){
 		console.info("rds-s3-exporter.skipped.notsupportedsource", {
@@ -50,15 +52,5 @@ export const main = middy(processEvent)
 		onError: (context, callback) => {
 			console.error("rds-s3-exporter.error", context.error);
 			callback(context.error);
-		}
-	})
-	.use({
-		before: (context) => {
-			const sqsEvent = context.event;
-			const record = sqsEvent.Records[0];
-			const event = JSON.parse(record.body);
-			context.event = event;
-			context.event.messageId = record.messageId;
-			context.event.traceId = uuidv4();
 		}
 	})
